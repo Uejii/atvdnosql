@@ -1,0 +1,223 @@
+import requests
+import json
+
+RIAK_URL = "http://localhost:8098"
+
+
+def inserir(bucket, chave, dados):
+    url = f"{RIAK_URL}/buckets/{bucket}/keys/{chave}"
+
+    resposta = requests.put(
+        url,
+        data=json.dumps(dados),
+        headers={"Content-Type": "application/json"}
+    )
+
+    if resposta.status_code in [200, 201, 204]:
+        print(f"✓ {chave} inserido/atualizado em '{bucket}'")
+        return True
+    else:
+        print(
+            f"✗ Erro ao inserir {chave}: "
+            f"HTTP {resposta.status_code}"
+        )
+        return False
+
+
+def buscar(bucket, chave):
+    url = f"{RIAK_URL}/buckets/{bucket}/keys/{chave}"
+
+    resposta = requests.get(url)
+
+    if resposta.status_code == 200:
+        return resposta.json()
+
+    return None
+
+
+def excluir(bucket, chave):
+    url = f"{RIAK_URL}/buckets/{bucket}/keys/{chave}"
+
+    resposta = requests.delete(url)
+
+    if resposta.status_code in [200, 204]:
+        print(f"✓ {chave} excluído de '{bucket}'")
+        return True
+    else:
+        print(
+            f"✗ Erro ao excluir {chave}: "
+            f"HTTP {resposta.status_code}"
+        )
+        return False
+
+
+def listar_chaves(bucket):
+    url = f"{RIAK_URL}/buckets/{bucket}/keys?keys=true"
+
+    resposta = requests.get(url)
+
+    if resposta.status_code == 200:
+
+        chaves = resposta.json().get("keys", [])
+        chaves_existentes = []
+
+        for chave in chaves:
+
+            consulta = requests.get(
+                f"{RIAK_URL}/buckets/{bucket}/keys/{chave}"
+            )
+
+            if consulta.status_code == 200:
+                chaves_existentes.append(chave)
+
+        print(f"{bucket}: {chaves_existentes}")
+
+    else:
+        print(
+            f"✗ Erro ao listar '{bucket}': "
+            f"HTTP {resposta.status_code}"
+        )
+
+
+def resetar_ambiente():
+    chaves_por_bucket = {
+        "professores": ["Thyago", "Afonso", "Leonardo"],
+        "alunos": ["Fernanda", "Theo"],
+        "funcionarios": ["Sophia", "Leonardo"],
+    }
+
+    for bucket, chaves in chaves_por_bucket.items():
+        for chave in chaves:
+            url = f"{RIAK_URL}/buckets/{bucket}/keys/{chave}"
+            requests.delete(url)
+
+
+resetar_ambiente()
+
+inserir(
+    "professores",
+    "Thyago",
+    {
+        "nome": "Thyago",
+        "idade": 35
+    }
+)
+
+inserir(
+    "professores",
+    "Afonso",
+    {
+        "nome": "Afonso",
+        "idade": 28
+    }
+)
+
+inserir(
+    "alunos",
+    "Fernanda",
+    {
+        "nome": "Fernanda",
+        "idade": 32
+    }
+)
+
+inserir(
+    "alunos",
+    "Theo",
+    {
+        "nome": "Theo",
+        "idade": 12
+    }
+)
+
+inserir(
+    "funcionarios",
+    "Sophia",
+    {
+        "nome": "Sophia",
+        "idade": 20
+    }
+)
+
+inserir(
+    "funcionarios",
+    "Leonardo",
+    {
+        "nome": "Leonardo",
+        "idade": 15
+    }
+)
+
+print("\n--- CHAVES DOS BUCKETS - ETAPA 1 ---")
+
+listar_chaves("professores")
+listar_chaves("alunos")
+listar_chaves("funcionarios")
+
+inserir(
+    "alunos",
+    "Theo",
+    {
+        "nome": "Theo",
+        "idade": 25
+    }
+)
+
+print("✓ Idade de Theo alterada para 25 anos")
+
+leonardo = buscar(
+    "funcionarios",
+    "Leonardo"
+)
+
+if leonardo is not None:
+
+    inserir(
+        "professores",
+        "Leonardo",
+        leonardo
+    )
+
+    excluir(
+        "funcionarios",
+        "Leonardo"
+    )
+
+    print(
+        "✓ Leonardo movido de "
+        "'funcionarios' para 'professores'"
+    )
+
+else:
+
+    print(
+        "✗ Leonardo não foi encontrado "
+        "em 'funcionarios'"
+    )
+
+excluir(
+    "professores",
+    "Afonso"
+)
+
+theo = buscar(
+    "alunos",
+    "Theo"
+)
+
+if theo is not None:
+
+    print(
+        f"\nConsulta de Theo: "
+        f"{theo['nome']} possui {theo['idade']} anos"
+    )
+
+else:
+
+    print("\n✗ Theo não foi encontrado")
+
+print("\n--- CHAVES DOS BUCKETS - ETAPA 2 ---")
+
+listar_chaves("professores")
+listar_chaves("alunos")
+listar_chaves("funcionarios")
