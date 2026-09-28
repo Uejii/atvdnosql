@@ -13,9 +13,9 @@ pip install -r AULA3\requirements.txt
 Crie `AULA3/atividade1/.env` com as configuracoes abaixo. `MONGO_URI` tambem pode ser lida do arquivo compartilhado `AULA2/.env`.
 
 ```dotenv
-CSV_URL=https://dados.gov.br/dataset/3b966e22-3a80-4464-9e3e-3c83f2e8b0c5/resource/e8a10748-423c-433a-9523-14c1c2eba6cf/download/ubs.csv
+CSV_URL=https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/CNES/Unidades_Basicas_Saude-UBS_csv.zip
 CSV_DELIMITER=;
-CSV_ENCODING=latin-1
+CSV_ENCODING=utf-8-sig
 # Configure se os nomes das colunas nao forem identificados automaticamente.
 CSV_LATITUDE_COLUMN=latitude
 CSV_LONGITUDE_COLUMN=longitude
@@ -24,7 +24,7 @@ MONGO_DB_NAME=dados_georreferenciados
 MONGO_COLLECTION_NAME=ubs
 ```
 
-O endereco padrao e o download de UBS citado no arquivo de apoio. Esse CSV usa `;`, codificacao Latin-1 e as colunas `NU_LATITUDE` e `NU_LONGITUDE`; o coletor ja esta configurado para esse formato. Se o catalogo mudar o endereco, informe outra URL direta em `CSV_URL`. O CSV precisa ter latitude e longitude em graus decimais. Nomes como `NU_LATITUDE`/`NU_LONGITUDE`, `latitude`/`lat` e `longitude`/`lon`/`lng` sao detectados automaticamente. Ajuste `CSV_DELIMITER` e `CSV_ENCODING` se usar outro arquivo.
+O endereco padrao aponta para o ZIP oficial de UBS no Portal de Dados Abertos do SUS. O arquivo atual contem um CSV separado por `;`, codificado em UTF-8, com as colunas `LATITUDE` e `LONGITUDE`; o coletor extrai e processa o CSV diretamente em memoria, sem criar arquivo temporario. Se o catalogo mudar o endereco, informe outra URL direta em `CSV_URL`. Coordenadas com virgula decimal sao normalizadas, e nomes comuns como `NU_LATITUDE`/`NU_LONGITUDE`, `latitude`/`lat` e `longitude`/`lon` tambem sao reconhecidos. Ajuste `CSV_DELIMITER` e `CSV_ENCODING` ao usar outro arquivo.
 
 ## Execucao
 

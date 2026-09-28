@@ -9,6 +9,7 @@ import unicodedata
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile, ZipFile
 
 import geopandas as gpd
 import pandas as pd
@@ -26,11 +27,11 @@ load_dotenv(REPOSITORY_DIR / "AULA2" / ".env")
 
 CSV_URL = os.getenv(
     "CSV_URL",
-    "https://dados.gov.br/dataset/3b966e22-3a80-4464-9e3e-3c83f2e8b0c5/"
-    "resource/e8a10748-423c-433a-9523-14c1c2eba6cf/download/ubs.csv",
+    "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/CNES/"
+    "Unidades_Basicas_Saude-UBS_csv.zip",
 )
 CSV_DELIMITER = os.getenv("CSV_DELIMITER", ";")
-CSV_ENCODING = os.getenv("CSV_ENCODING", "latin-1")
+CSV_ENCODING = os.getenv("CSV_ENCODING", "utf-8-sig")
 LATITUDE_COLUMN = os.getenv("CSV_LATITUDE_COLUMN", "")
 LONGITUDE_COLUMN = os.getenv("CSV_LONGITUDE_COLUMN", "")
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "60"))
@@ -77,18 +78,40 @@ def _resolver_coluna(
 
 
 def buscar_csv() -> pd.DataFrame:
-    """Baixa o CSV da URL configurada e carrega os dados em um DataFrame."""
+    """Baixa CSV ou ZIP da URL configurada e carrega o arquivo em um DataFrame."""
     if not CSV_URL:
         raise ValueError("Configure CSV_URL com a URL direta do arquivo CSV.")
 
     response = requests.get(CSV_URL, timeout=REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
-    dados = pd.read_csv(
-        BytesIO(response.content),
-        sep=CSV_DELIMITER,
-        encoding=CSV_ENCODING,
-        low_memory=False,
-    )
+    conteudo = BytesIO(response.content)
+    if CSV_URL.lower().split("?", maxsplit=1)[0].endswith(".zip"):
+        try:
+            with ZipFile(conteudo) as arquivo_zip:
+                arquivos_csv = [
+                    nome for nome in arquivo_zip.namelist() if nome.lower().endswith(".csv")
+                ]
+                if len(arquivos_csv) != 1:
+                    raise ValueError(
+                        "O ZIP deve conter exatamente um arquivo CSV; "
+                        f"foram encontrados {len(arquivos_csv)}."
+                    )
+                with arquivo_zip.open(arquivos_csv[0]) as arquivo_csv:
+                    dados = pd.read_csv(
+                        arquivo_csv,
+                        sep=CSV_DELIMITER,
+                        encoding=CSV_ENCODING,
+                        low_memory=False,
+                    )
+        except BadZipFile as error:
+            raise ValueError("O endereco configurado nao retornou um arquivo ZIP valido.") from error
+    else:
+        dados = pd.read_csv(
+            conteudo,
+            sep=CSV_DELIMITER,
+            encoding=CSV_ENCODING,
+            low_memory=False,
+        )
     if dados.empty:
         raise ValueError("O CSV nao possui registros.")
     return dados
@@ -190,7 +213,12 @@ def main() -> int:
             MONGO_COLLECTION_NAME,
         )
         return 0
-    except (requests.RequestException, PyMongoError, ValueError, pd.errors.ParserError) as error:
+    except (
+        requests.RequestException,
+        PyMongoError,
+        ValueError,
+        pd.errors.ParserError,
+    ) as error:
         logger.error("Falha na coleta ou gravacao: %s", error)
         return 1
     finally:
