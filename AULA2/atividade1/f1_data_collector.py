@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -10,8 +11,8 @@ from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
 
-# Carrega as configurações locais; variáveis de ambiente do sistema têm precedência.
-load_dotenv()
+# Carrega o .env compartilhado da AULA2; variáveis do sistema têm precedência.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 API_BASE_URL = os.getenv("OPENF1_BASE_URL", "https://api.openf1.org/v1").rstrip("/")
 API_TIMEOUT_SECONDS = int(os.getenv("API_TIMEOUT_SECONDS", "30"))
