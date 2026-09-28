@@ -35,31 +35,27 @@ from pymongo.errors import PyMongoError
 
 try:
     from streamlit_folium import st_folium
-except ImportError:  # sem streamlit-folium usamos o HTML do folium direto
+except ImportError:
     st_folium = None
 
-# ---------------------------------------------------------------------------
-# Configuração
-# ---------------------------------------------------------------------------
+
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB = "geolog_db"
 MONGO_COLLECTION = "telemetria"
 SQLITE_PATH = os.getenv("SQLITE_PATH", "logitech.db")
 
-LIMITE_VELOCIDADE = 80          # km/h
-RAIO_TERRA_KM = 6378.1          # usado no $centerSphere e no haversine
+LIMITE_VELOCIDADE = 80
+RAIO_TERRA_KM = 6378.1
 TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
-# Pontos de referência (latitude, longitude) - região de João Pessoa/PB
+
 PONTOS_REFERENCIA = {
     "Centro de João Pessoa": (-7.115, -34.873),
     "Cabo Branco": (-7.121, -34.832),
     "Tibiri / BR-230": (-7.150, -34.950),
 }
 
-# ---------------------------------------------------------------------------
-# Seed inicial (dados sugeridos no enunciado)
-# ---------------------------------------------------------------------------
+
 MOTORISTAS = [
     (1, "Carlos Andrade", "123456789", "Ativo"),
     (2, "Mariana Silva", "987654321", "Ativo"),
@@ -72,25 +68,25 @@ VEICULOS = [
     (103, "KGB-4567", "Mercedes Actros", 3),
 ]
 
-# GeoJSON usa [longitude, latitude]
+
 TELEMETRIA_SEED = [
     {
         "veiculo_id": 101,
-        "location": {"type": "Point", "coordinates": [-34.873, -7.115]},  # Centro
+        "location": {"type": "Point", "coordinates": [-34.873, -7.115]},
         "temperatura": 4.2,
         "velocidade": 65,
         "timestamp": "2026-09-11T10:00:00Z",
     },
     {
         "veiculo_id": 102,
-        "location": {"type": "Point", "coordinates": [-34.832, -7.121]},  # Cabo Branco
-        "temperatura": -18.5,  # carga congelada
-        "velocidade": 85,      # alerta de velocidade
+        "location": {"type": "Point", "coordinates": [-34.832, -7.121]},
+        "temperatura": -18.5,
+        "velocidade": 85,
         "timestamp": "2026-09-11T10:05:00Z",
     },
     {
         "veiculo_id": 103,
-        "location": {"type": "Point", "coordinates": [-34.950, -7.150]},  # Tibiri / BR-230
+        "location": {"type": "Point", "coordinates": [-34.950, -7.150]},
         "temperatura": 22.0,
         "velocidade": 0,
         "timestamp": "2026-09-11T09:45:00Z",
@@ -114,21 +110,15 @@ CREATE TABLE IF NOT EXISTS veiculos (
 
 
 def gerar_telemetria_seed() -> list[dict]:
-    """Os 3 registros do enunciado (mais recentes) + um histórico anterior.
-
-    O histórico (6 leituras a cada 10 min, antes de cada registro do enunciado)
-    existe só para o gráfico de temperatura e a trilha no mapa terem mais de um
-    ponto por veículo. É determinístico (seed fixa).
-    """
     rng = random.Random(42)
-    docs = copy.deepcopy(TELEMETRIA_SEED)  # deepcopy: o pymongo injeta _id nos dicts
+    docs = copy.deepcopy(TELEMETRIA_SEED)
 
     for base in TELEMETRIA_SEED:
         lon, lat = base["location"]["coordinates"]
         parado = base["velocidade"] == 0
         t0 = datetime.strptime(base["timestamp"], TS_FORMAT)
         for k in range(1, 7):
-            if not parado:  # caminhão em movimento: passeio aleatório para trás no tempo
+            if not parado:
                 lon += rng.uniform(-0.004, 0.004)
                 lat += rng.uniform(-0.004, 0.004)
             velocidade = 0 if parado else max(0, base["velocidade"] + rng.randint(-15, 15))
@@ -142,12 +132,9 @@ def gerar_telemetria_seed() -> list[dict]:
     return docs
 
 
-# ---------------------------------------------------------------------------
-# Módulo 1 - Persistência poliglota: SQLite (relacional)
-# ---------------------------------------------------------------------------
 def conectar_sqlite() -> sqlite3.Connection:
-    # Uma conexão por operação: o sqlite3 não pode ser compartilhado entre threads
-    # e o Streamlit executa cada rerun em uma thread diferente.
+
+
     conn = sqlite3.connect(SQLITE_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -155,7 +142,7 @@ def conectar_sqlite() -> sqlite3.Connection:
 
 def inicializar_sqlite() -> None:
     with closing(conectar_sqlite()) as conn:
-        with conn:  # commit automático
+        with conn:
             conn.executescript(DDL_SQLITE)
             conn.executemany(
                 "INSERT OR IGNORE INTO motoristas (id, nome, cnh, status) VALUES (?, ?, ?, ?)",
@@ -185,20 +172,17 @@ def carregar_status_motoristas() -> pd.DataFrame:
         return pd.read_sql_query(sql, conn)
 
 
-# ---------------------------------------------------------------------------
-# Módulo 1 - Persistência poliglota: MongoDB (documentos + geoespacial)
-# ---------------------------------------------------------------------------
 @st.cache_resource
 def conectar_mongo() -> MongoClient:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
-    client.admin.command("ping")  # falha rápido se o servidor não estiver no ar
+    client.admin.command("ping")
     return client
 
 
 def inicializar_mongo(colecao) -> None:
-    # Índice obrigatório do desafio: 2dsphere sobre o campo GeoJSON "location"
+
     colecao.create_index([("location", GEOSPHERE)], name="idx_location_2dsphere")
-    # Apoia a consulta "última leitura de cada veículo"
+
     colecao.create_index(
         [("veiculo_id", ASCENDING), ("timestamp", DESCENDING)], name="idx_veiculo_timestamp"
     )
@@ -207,7 +191,6 @@ def inicializar_mongo(colecao) -> None:
 
 
 def buscar_ultimas_telemetrias(colecao) -> list[dict]:
-    """Última leitura de cada veículo (documentos completos, com _id)."""
     pipeline = [
         {"$sort": {"veiculo_id": 1, "timestamp": -1}},
         {"$group": {"_id": "$veiculo_id", "doc": {"$first": "$$ROOT"}}},
@@ -222,9 +205,6 @@ def buscar_historico(colecao, veiculo_ids=None) -> list[dict]:
     return list(colecao.find(filtro, {"_id": 0}).sort("timestamp", ASCENDING))
 
 
-# ---------------------------------------------------------------------------
-# Módulo 2 - Geoprocessamento (busca por raio)
-# ---------------------------------------------------------------------------
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dp, dl = p2 - p1, math.radians(lon2 - lon1)
@@ -233,19 +213,14 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def buscar_por_raio(colecao, lat: float, lon: float, raio_km: float, operador: str) -> list[dict]:
-    """Veículos cuja ÚLTIMA posição está a até raio_km do ponto (lat, lon).
-
-    A geoconsulta roda no MongoDB ($near ou $geoWithin); o filtro por _id
-    garante que só a posição atual de cada veículo seja considerada.
-    """
     ids_ultimas = [d["_id"] for d in buscar_ultimas_telemetrias(colecao)]
 
     if operador == "$near":
         filtro_geo = {"$near": {
             "$geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "$maxDistance": raio_km * 1000,  # metros
+            "$maxDistance": raio_km * 1000,
         }}
-    else:  # $geoWithin
+    else:
         filtro_geo = {"$geoWithin": {"$centerSphere": [[lon, lat], raio_km / RAIO_TERRA_KM]}}
 
     encontrados = list(colecao.find({"_id": {"$in": ids_ultimas}, "location": filtro_geo}))
@@ -284,7 +259,7 @@ def construir_mapa(lat, lon, raio_km, dentro, fora, cadastro: pd.DataFrame, hist
             f"<b>{placa}</b> ({html.escape(str(dados.get('modelo', '-')))})<br>"
             f"Motorista: {motorista}<br>"
             f"Temperatura: {doc['temperatura']} °C<br>"
-            f"Velocidade: {doc['velocidade']} km/h{' - alerta' if alerta else ''}<br>"
+            f"Velocidade: {doc['velocidade']} km/h{' (ALERTA)' if alerta else ''}<br>"
             f"Distância: {doc['distancia_km']:.2f} km"
         )
         folium.Marker(
@@ -294,7 +269,7 @@ def construir_mapa(lat, lon, raio_km, dentro, fora, cadastro: pd.DataFrame, hist
             icon=folium.Icon(color="red" if alerta else "green", icon="truck", prefix="fa"),
         ).add_to(mapa)
 
-        # Rota recente do veículo (histórico de posições em ordem cronológica)
+
         trilha = [
             [p["location"]["coordinates"][1], p["location"]["coordinates"][0]]
             for p in historico if p["veiculo_id"] == doc["veiculo_id"]
@@ -302,7 +277,7 @@ def construir_mapa(lat, lon, raio_km, dentro, fora, cadastro: pd.DataFrame, hist
         if len(trilha) > 1:
             folium.PolyLine(trilha, color="#2ca02c", weight=3, opacity=0.7).add_to(mapa)
 
-    for doc in fora:  # veículos fora do raio aparecem em cinza
+    for doc in fora:
         d_lon, d_lat = doc["location"]["coordinates"]
         placa = html.escape(str(info.get(doc["veiculo_id"], {}).get("placa", doc["veiculo_id"])))
         folium.CircleMarker(
@@ -316,15 +291,12 @@ def exibir_mapa(mapa: folium.Map) -> None:
     if st_folium is not None:
         try:
             st_folium(mapa, height=520, use_container_width=True, returned_objects=[])
-        except TypeError:  # versões do streamlit-folium sem use_container_width
+        except TypeError:
             st_folium(mapa, height=520, returned_objects=[])
     else:
         components.html(mapa.get_root().render(), height=540)
 
 
-# ---------------------------------------------------------------------------
-# Módulo 3 - Join poliglota em memória (SQLite x MongoDB)
-# ---------------------------------------------------------------------------
 def montar_visao_unificada(cadastro: pd.DataFrame, ultimas: list[dict]) -> pd.DataFrame:
     colunas = ["veiculo_id", "temperatura", "velocidade", "latitude", "longitude", "timestamp"]
     telemetria = pd.DataFrame(
@@ -362,14 +334,11 @@ def tabela_enriquecida(unificado: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-# ---------------------------------------------------------------------------
-# Bônus - Simulador de telemetria em tempo real
-# ---------------------------------------------------------------------------
 def gerar_novo_ponto(ultimo: dict, rng=random) -> dict:
     lon, lat = ultimo["location"]["coordinates"]
     agora = datetime.now(timezone.utc).replace(microsecond=0)
     ultimo_ts = datetime.strptime(ultimo["timestamp"], TS_FORMAT).replace(tzinfo=timezone.utc)
-    novo_ts = max(agora, ultimo_ts + timedelta(seconds=1))  # sempre posterior à última leitura
+    novo_ts = max(agora, ultimo_ts + timedelta(seconds=1))
     return {
         "veiculo_id": ultimo["veiculo_id"],
         "location": {
@@ -392,9 +361,6 @@ def simular_movimentacao(colecao) -> int:
     return len(novos)
 
 
-# ---------------------------------------------------------------------------
-# Interface Streamlit
-# ---------------------------------------------------------------------------
 def renderizar_sidebar(colecao) -> tuple[float, float, float, str]:
     st.sidebar.header("Busca por raio")
     opcoes = list(PONTOS_REFERENCIA) + ["Personalizado"]
@@ -407,8 +373,7 @@ def renderizar_sidebar(colecao) -> tuple[float, float, float, str]:
     raio_km = st.sidebar.slider("Raio de busca (km)", min_value=1, max_value=50, value=6)
     operador = st.sidebar.radio("Operador geoespacial", ["$near", "$geoWithin"], horizontal=True)
 
-    # Os botões rodam ANTES das abas serem desenhadas, então o mapa e o
-    # dashboard já saem atualizados no mesmo rerun (sem reiniciar o app).
+
     st.sidebar.divider()
     st.sidebar.header("Simulador de telemetria")
     if st.sidebar.button("Simular Movimentação"):
